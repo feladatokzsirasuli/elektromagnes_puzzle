@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Képkirakó Játék</title>
+    
+    <!-- Firebase SDK-k betöltése (Verzió: 8.10.1) -->
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background-color: #f0f0f0;
+            margin: 2px;
+        }
+        h1 {
+    color: #333;
+    margin-bottom: 5px; /* Lecsökkentve, hogy közelebb legyen a kiemelt szöveghez */
+}
+        #info-panel {
+            font-size: 18px;
+            margin: 5px auto;
+            font-weight: bold;
+            color: #444;
+        }
+        /* A játék táblája (5x5 darabos játékhoz) */
+        #puzzle-board {
+            display: grid;
+            grid-template-columns: repeat(5, 80px);
+            grid-template-rows: repeat(5, 80px);
+            gap: 2px;
+            justify-content: center;
+            margin: 10px auto;
+            background-color: #ccc;
+            padding: 5px;
+            border-radius: 5px;
+            width: 406px;
+            position: relative;
+        }
+        .tile {
+            width: 80px;
+            height: 80px;
+            cursor: pointer;
+            border: 1px solid rgba(255,255,255,0.5);
+            box-sizing: border-box;
+            transition: opacity 0.2s, transform 0.2s;
+        }
+        .tile:hover {
+            opacity: 0.9;
+        }
+        /* Kijelölt darab stílusa */
+        .selected {
+            outline: 3px solid #ff0000;
+            transform: scale(0.95);
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        /* SÚGÓ MÓD STÍLUSA: Elhalványítja a csempéket, hogy látszódjon a háttérkép */
+        #puzzle-board.hint-mode {
+            background-size: cover;
+            background-position: center;
+        }
+        #puzzle-board.hint-mode .tile {
+            opacity: 0.15;
+            pointer-events: none; /* Súgó alatt nem lehet kattintani */
+        }
+        /* Toplista stílusa */
+        #leaderboard {
+            margin: 10px auto;
+            max-width: 400px;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        #leaderboard h2 {
+            margin-top: 0;
+            color: #333;
+        }
+        #score-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            text-align: left;
+        }
+        #score-list li {
+            padding: 8px 10px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+        }
+        #score-list li:last-child {
+            border-bottom: none;
+        }
+        .rank { font-weight: bold; color: #4CAF50; }
+		
+		#task-text {
+    font-size: 20px;
+    font-weight: bold;
+    color: #2c3e50; /* Sötétkék, jól olvasható betűk */
+    background-color: #fff3cd; /* Vidám, halványsárga kiemelés */
+    border-left: 5px solid #ff9800; /* Egy vastag narancssárga csík a bal szélén */
+    padding: 12px;
+    display: inline-block;
+    border-radius: 6px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    margin-top: 5px;    /* Minimális távolság a címsortól */
+    margin-bottom: 5px; /* Minimális távolság az alatta lévő statisztikai sávtól */
+}
+		
+    </style>
+</head>
+<body>
+
+    <h1>Képkirakó Játék </h1>
+    <p id="task-text">Kattints két darabra, hogy megcseréld őket! Rakd ki a képet!</p>
+    
+    <!-- Statisztikai kijelző -->
+    <div id="info-panel">
+        Kép: <span id="current-image-num">1</span> / <span id="total-images-num">2</span> | 
+        Kattintások: <span id="click-counter">0</span> | 
+        Idő: <span id="timer-counter">0</span> mp
+    </div>
+
+    <!-- Játéktábla -->
+    <div id="puzzle-board"></div>
+    
+    <!-- Kezelőgombok -->
+    <button onclick="startGame()">Új játék</button>
+    <button onclick="showHint()" style="background-color: #ff9800;">Súgó</button>
+    <button onclick="skipImage()" style="background-color: #e74c3c;">Kép átugrása</button>
+
+    <!-- Toplista -->
+    <div id="leaderboard">
+        <h2>🏆 Top 5 Legjobb Eredmény</h2>
+        <ul id="score-list">
+            <li>Betöltés...</li>
+        </ul>
+    </div>
+	<script>
+        // --- FIREBASE INICIALIZÁLÁS (JAVÍTOTT V8 MEGOLDÁS) ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyC4ypKsFziwbyOQ87Sb-1PrrIZcvLf1_xQ",
+            authDomain: "://firebaseapp.com",
+            databaseURL: "https://fizikadomino-default-rtdb.europe-west1.firebasedatabase.app",
+            projectId: "fizikadomino",
+            storageBucket: "fizikadomino.firebasestorage.app",
+            messagingSenderId: "272119065201",
+            appId: "1:272119065201:web:c6bdc223fd9a61394f49d0",
+            measurementId: "G-6PNNLQV1GH"
+        };
+        
+        // A v8 európai régiós hibáját az 'app' név kényszerítésével hárítjuk el
+        const app = firebase.initializeApp(firebaseConfig, "fizikadomino");
+        const database = app.database();
+
+        // --- JÁTÉK VÁLTOZÓK ÉS KÉPMAPPA ---
+        const imageFolder = [
+            'elektromos_csengő.png',
+			'elektromos motor.png',
+            'távkapcsoló.png'
+        ];
+        
+        let currentImageIndex = 0;
+        const board = document.getElementById('puzzle-board');
+        let tiles = [];
+        let firstSelectedTile = null;
+
+        // Összesített (halmozott) számlálók a teljes játékra
+        let totalClicks = 0;
+        let totalSeconds = 0;
+        let hintCount = 0; // Súgó használat számlálója
+		let skipCount = 0; // ÚJ: Számolja, hányszor ugrottak át képet
+		let earnedScores = 0;
+        
+        let timerInterval = null;
+        let gameActive = false;
+
+   // Játék indítása vagy következő kép betöltése
+        function startGame() {
+            board.innerHTML = '';
+            board.classList.remove('hint-mode');
+            board.style.backgroundImage = 'none';
+            tiles = [];
+            firstSelectedTile = null;
+            gameActive = true;
+            
+            // --- ÚJ: Dinamikus szöveg kiírása a fájlnév alapján ---
+            const currentImageUrl = imageFolder[currentImageIndex];
+            // Levágjuk a kiterjesztést és a pontot a fájlnév végéről
+            const cleanName = currentImageUrl.split('.')[0]; 
+            // Kijelöljük a bekezdést és átírjuk a szövegét
+            //document.querySelector('p').innerText = ` Rakd ki a ${cleanName} rajzát! Kattints két négyzetre, hogy megcseréld őket!`;
+			document.getElementById('task-text').innerHTML = `Rakd ki a <span style="color: #e74c3c; font-size: 22px;">${cleanName}</span> rajzát! Kattints két négyzetre, hogy felcseréld őket! `;
+            // -----------------------------------------------------
+
+            // Csak a legelső kép indításakor nullázzuk a globális számlálókat
+            if (currentImageIndex === 0) {
+                totalClicks = 0;
+                totalSeconds = 0;
+                hintCount = 0;
+				skipCount = 0; // Új játék indításakor ez is nullázódik
+                
+                clearInterval(timerInterval);
+                timerInterval = setInterval(() => {
+                    if (gameActive) {
+                        totalSeconds++;
+                        document.getElementById('timer-counter').innerText = totalSeconds;
+                    }
+                }, 1000);
+            }
+
+            // Kijelző frissítése az aktuális értékekkel
+            document.getElementById('total-images-num').innerText = imageFolder.length;
+            document.getElementById('current-image-num').innerText = currentImageIndex + 1;
+            document.getElementById('click-counter').innerText = totalClicks;
+            document.getElementById('timer-counter').innerText = totalSeconds;
+
+            // 25 darab létrehozása (5x5 tábla)
+            for (let i = 0; i < 25; i++) { 
+                tiles.push(i);
+            }
+
+            shuffle(tiles);
+
+            <!---const currentImageUrl = imageFolder[currentImageIndex];--->
+
+            tiles.forEach((pos, index) => {
+                const tile = document.createElement('div');
+                tile.classList.add('tile');
+                
+                const row = Math.floor(pos / 5); 
+                const col = pos % 5;
+                
+                tile.style.backgroundImage = `url('${currentImageUrl}')`;
+                tile.style.backgroundPosition = `-${col * 80}px -${row * 80}px`; 
+                
+                tile.dataset.currentIndex = index;
+                tile.dataset.correctIndex = pos;
+
+                tile.addEventListener('click', onTileClick);
+                board.appendChild(tile);
+            });
+        }
+
+        // Tömb megkeverése (Fisher-Yates)
+        function shuffle(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+        }
+
+        // Kattintás kezelése
+        function onTileClick(e) {
+            if (!gameActive) return;
+            
+            const clickedTile = e.currentTarget;
+
+            if (!firstSelectedTile) {
+                firstSelectedTile = clickedTile;
+                firstSelectedTile.classList.add('selected');
+            } else {
+                if (firstSelectedTile === clickedTile) {
+                    firstSelectedTile.classList.remove('selected');
+                    firstSelectedTile = null;
+                    return;
+                }
+
+                totalClicks++;
+                document.getElementById('click-counter').innerText = totalClicks;
+
+                swapTiles(firstSelectedTile, clickedTile);
+                firstSelectedTile.classList.remove('selected');
+                firstSelectedTile = null;
+
+                checkWin();
+            }
+        }
+
+        // Két darab megcserélése
+        function swapTiles(tile1, tile2) {
+            const bgPos1 = tile1.style.backgroundPosition;
+            const bgPos2 = tile2.style.backgroundPosition;
+
+            const correctIdx1 = tile1.dataset.correctIndex;
+            const correctIdx2 = tile2.dataset.correctIndex;
+
+            tile1.style.backgroundPosition = bgPos2;
+            tile2.style.backgroundPosition = bgPos1;
+
+            tile1.dataset.correctIndex = correctIdx2;
+            tile2.dataset.correctIndex = correctIdx1;
+        }
+
+        // Győzelem ellenőrzése
+        function checkWin() {
+            const allTiles = document.querySelectorAll('.tile');
+            let isWin = true;
+
+            allTiles.forEach(tile => {
+                if (tile.dataset.currentIndex !== tile.dataset.correctIndex) {
+                    isWin = false;
+                }
+            });
+
+            if (isWin) {
+                gameActive = false;
+                earnedScores += 10; // MODOSÍTÁS: Alapból +10 pont jár a sikeres képért (a súgó levonásai már benne vannak)
+
+                setTimeout(() => {
+                    currentImageIndex++;
+
+                    if (currentImageIndex < imageFolder.length) {
+                        alert("Szuper! Ezt a képet kiraktad. Jöhet a következő!");
+                        startGame();
+                    } 
+                    else {
+                        clearInterval(timerInterval);
+                        
+                        alert(`🏆 GRATULÁLOK!\nSikeresen befejezted a játékot!\n\nÖsszesített idő: ${totalSeconds} mp\nÖsszesített kattintás: ${totalClicks}\nHasznált súgó: ${hintCount} db\nVégső pontszám: ${earnedScores} pont`);
+                        
+                        let playerName = prompt("Kérlek, add meg a neved a ranglistához:", "Játékos");
+                        if (!playerName) playerName = "Névtelen";
+
+                        saveScore(playerName, earnedScores, totalClicks, totalSeconds);
+
+                        currentImageIndex = 0;
+                        startGame();
+                    }
+                }, 300);
+            }
+        }
+
+        // SÚGÓ FUNKCIÓ: Felvillantja az eredeti képet 3 másodpercre és levon 1 pontot
+        function showHint() {
+            if (!gameActive || board.classList.contains('hint-mode')) return;
+
+            hintCount++;
+            
+            // MODOSÍTÁS: Súgó használatakor levonunk 1 pontot, de nem engedjük 0 alá menni
+            earnedScores -= 1;
+            if (earnedScores < 0) earnedScores = 0;
+
+            const currentImageUrl = imageFolder[currentImageIndex];
+
+            board.style.backgroundImage = `url('${currentImageUrl}')`;
+            board.classList.add('hint-mode');
+
+            setTimeout(() => {
+                board.classList.remove('hint-mode');
+                board.style.backgroundImage = 'none';
+            }, 3000);
+        }
+		
+
+// KÉP ÁTUGRÁSA FUNKCIÓ (JAVÍTOTT, CSALÁSBIZTOS ÉS FELUGRÓ ABLAK NÉLKÜLI VERZIÓ)
+function skipImage() {
+    if (!gameActive) return;
+
+    // Megkérdezzük, hogy biztosan át akarja-e ugrani
+    if (confirm("Biztosan átugrod ezt a képet? (A képért nem kapsz pontot!)")) {
+        skipCount++;
+        currentImageIndex++;
+
+        // Ha van még kép, AZONNAL betöltjük a következőt (felugró ablak nélkül!)
+        if (currentImageIndex < imageFolder.length) {
+            startGame();
+        } 
+        // Ha ez volt az utolsó kép, akkor vége a játéknak és mentünk
+        else {
+            clearInterval(timerInterval);
+            gameActive = false;
+
+            // MODOSÍTÁS: Nem engedjük a pontszámot 0 alá menni
+            if (earnedScores < 0) earnedScores = 0;
+
+            alert(`🏆 VÉGE A JÁTÉKNAK!\n\nÖsszesített idő: ${totalSeconds} mp\nÖsszesített kattintás: ${totalClicks}\nÁtugrott képek: ${skipCount} db\nHasznált súgó: ${hintCount} db\nVégső pontszám: ${earnedScores} pont`);
+            
+            let playerName = prompt("Kérlek, add meg a neved a ranglistához:", "Játékos");
+            if (!playerName) playerName = "Névtelen";
+
+            saveScore(playerName, earnedScores, totalClicks, totalSeconds);
+
+            currentImageIndex = 0;
+            startGame();
+        }
+    }
+}
+        // --- ADATBÁZIS MŰVELETEK ---
+        function saveScore(name, score, clickCount, timeCount) {
+            database.ref('puzzle_leaderboard').push({
+                name: name,
+                score: score,
+                clicks: clickCount,
+                time: timeCount,
+                timestamp: firebase.database.ServerValue.TIMESTAMP
+            });
+        }
+
+        function loadLeaderboard() {
+            database.ref('puzzle_leaderboard')
+                .orderByChild('score')
+                .limitToLast(5)
+                .on('value', (snapshot) => {
+                    const listElement = document.getElementById('score-list');
+                    listElement.innerHTML = '';
+
+                    let scores = [];
+                    snapshot.forEach((childSnapshot) => {
+                        scores.push(childSnapshot.val());
+                    });
+
+                    scores.reverse();
+
+                    if(scores.length === 0) {
+                        listElement.innerHTML = '<li>Még nincs elmentett eredmény.</li>';
+                        return;
+                    }
+
+                    scores.forEach((data, index) => {
+                        const li = document.createElement('li');
+                        li.innerHTML = `
+                            <span><span class="rank">#${index + 1}</span> ${data.name}</span>
+                            <span><strong>${data.score} pont</strong> (${data.time} mp / ${data.clicks} katt)</span>
+                        `;
+                        listElement.appendChild(li);
+                    });
+                });
+        }
+
+        window.onload = () => {
+            startGame();
+            loadLeaderboard();
+        };
+    </script>
+</body>
+</html>
