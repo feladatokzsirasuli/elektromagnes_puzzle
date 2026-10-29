@@ -403,6 +403,11 @@ function skipImage() {
 }
         // --- ADATBÁZIS MŰVELETEK ---
         function saveScore(name, score, clickCount, timeCount) {
+            // JAVÍTÁS: Ha a pontszám valamiért több lenne mint 30, lekorlátozzuk 30-ra
+            if (score > 30) {
+                score = 30;
+            }
+
             database.ref('puzzle_leaderboard').push({
                 name: name,
                 score: score,
